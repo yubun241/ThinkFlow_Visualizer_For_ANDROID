@@ -8,28 +8,76 @@
 <script src="https://cdn.jsdelivr.net/npm/leader-line-new@1.1.9/leader-line.min.js"></script>
 
 <style>
-body { touch-action: none; }
-.canvas { position: relative; width: 100%; height: 85vh; background: #fff; overflow: hidden; }
-.node { position: absolute; min-width: 80px; min-height: 40px; background: #fff; border: 2px solid #6366f1; border-radius: 10px; padding: 10px; touch-action: none; }
-.resizer { width: 14px; height: 14px; background: #6366f1; position: absolute; right: 0; bottom: 0; }
-.header { display:flex; justify-content:space-between; padding:10px; font-weight:bold; }
-.line-selected { filter: drop-shadow(0 0 6px red); }
+body { margin:0; overflow:hidden; touch-action:none; background:#f1f5f9; }
+
+.header {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 16px; background:white; border-bottom:1px solid #e2e8f0;
+}
+
+.canvas {
+    position:relative; width:100%; height:calc(100vh - 110px);
+    background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+    background-size: 20px 20px;
+    overflow:hidden;
+}
+
+.node {
+    position:absolute;
+    min-width:100px;
+    min-height:50px;
+    padding:12px;
+    border-radius:14px;
+    background:white;
+    border:2px solid #6366f1;
+    box-shadow:0 4px 10px rgba(0,0,0,0.1);
+    touch-action:none;
+    transition:transform 0.1s;
+}
+.node:active { transform:scale(1.05); }
+
+.resizer {
+    width:14px; height:14px;
+    background:#6366f1;
+    position:absolute;
+    right:0; bottom:0;
+    border-radius:4px;
+}
+
+.line-selected {
+    filter: drop-shadow(0 0 6px red);
+}
+
+.toolbar {
+    display:flex;
+    gap:8px;
+    padding:10px;
+    background:white;
+}
+
+button {
+    padding:8px 12px;
+    border-radius:10px;
+    font-size:12px;
+    font-weight:bold;
+}
 </style>
 </head>
 
-<body class="bg-gray-100">
+<body>
 
 <!-- ヘッダー -->
 <div class="header">
-    <div class="text-purple-600 text-lg">ThinkFlow</div>
-    <div class="text-gray-700 text-sm">藤井工藝</div>
+    <div class="text-purple-600 font-black text-lg">ThinkFlow</div>
+    <div class="text-gray-600 text-sm">藤井工藝</div>
 </div>
 
-<!-- 操作 -->
-<div class="p-2 flex gap-2">
-    <textarea id="input" class="flex-1 p-2 border rounded" placeholder="入力"></textarea>
-    <button onclick="createNode()" class="bg-black text-white px-3 py-2 rounded">追加</button>
-    <button onclick="clearAll()" class="bg-red-500 text-white px-3 py-2 rounded">全消去</button>
+<!-- ツールバー -->
+<div class="toolbar">
+    <textarea id="input" class="flex-1 border rounded p-2" placeholder="入力"></textarea>
+    <button onclick="createNode()" class="bg-black text-white">追加</button>
+    <button onclick="duplicateNode()" class="bg-blue-500 text-white">複製</button>
+    <button onclick="clearAll()" class="bg-red-500 text-white">全消去</button>
 </div>
 
 <div id="canvas" class="canvas"></div>
@@ -39,163 +87,161 @@ let nodes = [];
 let connections = [];
 let selectedNode = null;
 let selectedLine = null;
+let scale = 1;
 
 // ===== ノード作成 =====
 function createNode(data=null){
-    const text = data ? data.text : document.getElementById("input").value;
+    const text = data ? data.text : input.value;
     if(!text) return;
 
     const node = document.createElement("div");
     const id = data ? data.id : "n_" + Date.now();
 
-    node.className = "node";
-    node.id = id;
-    node.innerText = text;
+    node.className="node";
+    node.id=id;
+    node.innerText=text;
 
-    node.style.left = data ? data.left : "50px";
-    node.style.top = data ? data.top : "50px";
+    node.style.left = data?.left || "80px";
+    node.style.top = data?.top || "80px";
 
-    const resizer = document.createElement("div");
-    resizer.className = "resizer";
+    const resizer=document.createElement("div");
+    resizer.className="resizer";
     node.appendChild(resizer);
 
     initDrag(node);
-    initResize(node, resizer);
+    initResize(node,resizer);
     initLongPress(node);
 
-    node.onclick = (e)=>{
+    node.onclick=(e)=>{
         e.stopPropagation();
 
         if(!selectedNode){
-            selectedNode = id;
-            node.style.outline = "3px solid red";
-        }else if(selectedNode === id){
-            node.style.outline = "none";
-            selectedNode = null;
+            selectedNode=id;
+            node.style.outline="3px solid red";
+        }else if(selectedNode===id){
+            node.style.outline="none";
+            selectedNode=null;
         }else{
-            connect(selectedNode, id);
+            connect(selectedNode,id);
             document.getElementById(selectedNode).style.outline="none";
             selectedNode=null;
         }
     };
 
-    document.getElementById("canvas").appendChild(node);
-    nodes.push({id, el:node});
+    canvas.appendChild(node);
+    nodes.push({id,el:node});
     save();
 }
 
-// ===== ドラッグ =====
+// ===== ドラッグ（スナップ付き） =====
 function initDrag(node){
     let offsetX, offsetY;
 
-    node.addEventListener("pointerdown", (e)=>{
+    node.onpointerdown=(e)=>{
         if(e.target.classList.contains("resizer")) return;
 
-        const rect = node.getBoundingClientRect();
-        offsetX = e.clientX - rect.left;
-        offsetY = e.clientY - rect.top;
+        offsetX=e.offsetX;
+        offsetY=e.offsetY;
 
-        const move = (me)=>{
-            node.style.left = (me.clientX - offsetX) + "px";
-            node.style.top = (me.clientY - offsetY) + "px";
+        const move=(me)=>{
+            let x = me.clientX - offsetX;
+            let y = me.clientY - offsetY;
+
+            // グリッドスナップ
+            x = Math.round(x / 20) * 20;
+            y = Math.round(y / 20) * 20;
+
+            node.style.left = x+"px";
+            node.style.top = y+"px";
+
             updateLines(node.id);
         };
 
-        const up = ()=>{
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", up);
+        const up=()=>{
+            window.removeEventListener("pointermove",move);
+            window.removeEventListener("pointerup",up);
             save();
         };
 
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", up);
-    });
+        window.addEventListener("pointermove",move);
+        window.addEventListener("pointerup",up);
+    };
 }
 
 // ===== リサイズ =====
-function initResize(node, handle){
-    handle.addEventListener("pointerdown", (e)=>{
+function initResize(node,resizer){
+    resizer.onpointerdown=(e)=>{
         e.stopPropagation();
 
-        let startX = e.clientX;
-        let startY = e.clientY;
-        let startW = node.offsetWidth;
-        let startH = node.offsetHeight;
+        let sx=e.clientX, sy=e.clientY;
+        let sw=node.offsetWidth, sh=node.offsetHeight;
 
-        const move = (me)=>{
-            node.style.width = (startW + me.clientX - startX) + "px";
-            node.style.height = (startH + me.clientY - startY) + "px";
+        const move=(me)=>{
+            node.style.width=(sw+me.clientX-sx)+"px";
+            node.style.height=(sh+me.clientY-sy)+"px";
             updateLines(node.id);
         };
 
-        const up = ()=>{
-            window.removeEventListener("pointermove", move);
-            window.removeEventListener("pointerup", up);
+        const up=()=>{
+            window.removeEventListener("pointermove",move);
+            window.removeEventListener("pointerup",up);
             save();
         };
 
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", up);
-    });
+        window.addEventListener("pointermove",move);
+        window.addEventListener("pointerup",up);
+    };
 }
 
 // ===== 長押し削除 =====
 function initLongPress(node){
     let timer;
 
-    node.addEventListener("pointerdown", ()=>{
-        timer = setTimeout(()=>{
-            deleteNode(node.id);
-        }, 700);
-    });
+    node.onpointerdown=()=>{
+        timer=setTimeout(()=>deleteNode(node.id),700);
+    };
 
-    node.addEventListener("pointerup", ()=>clearTimeout(timer));
-    node.addEventListener("pointermove", ()=>clearTimeout(timer));
+    node.onpointerup=()=>clearTimeout(timer);
+    node.onpointermove=()=>clearTimeout(timer);
 }
 
-// ===== 接続（改善版） =====
+// ===== 接続 =====
 function connect(a,b){
-    const line = new LeaderLine(
+    const line=new LeaderLine(
         document.getElementById(a),
         document.getElementById(b),
-        { color: "#6366f1", size:3 }
+        {color:"#6366f1",size:3}
     );
 
-    // タップで選択→再タップで削除
-    line.path.addEventListener("click", ()=>{
-        if(selectedLine === line){
+    line.path.onclick=()=>{
+        if(selectedLine===line){
             line.remove();
-            connections = connections.filter(c=>c.line!==line);
-            selectedLine = null;
+            connections=connections.filter(c=>c.line!==line);
+            selectedLine=null;
             save();
         }else{
-            if(selectedLine){
-                selectedLine.path.classList.remove("line-selected");
-            }
-            selectedLine = line;
+            if(selectedLine) selectedLine.path.classList.remove("line-selected");
+            selectedLine=line;
             line.path.classList.add("line-selected");
         }
-    });
+    };
 
     connections.push({a,b,line});
 }
 
-// ===== 線更新 =====
+// ===== 更新 =====
 function updateLines(id){
     connections.forEach(c=>{
-        if(c.a===id || c.b===id){
-            c.line.position();
-        }
+        if(c.a===id||c.b===id) c.line.position();
     });
 }
 
 // ===== 削除 =====
 function deleteNode(id){
-    const node = document.getElementById(id);
-    node.remove();
+    document.getElementById(id).remove();
 
     connections = connections.filter(c=>{
-        if(c.a===id || c.b===id){
+        if(c.a===id||c.b===id){
             c.line.remove();
             return false;
         }
@@ -206,41 +252,48 @@ function deleteNode(id){
     save();
 }
 
+// ===== 複製 =====
+function duplicateNode(){
+    if(!selectedNode) return;
+    const n = nodes.find(n=>n.id===selectedNode);
+    createNode({
+        text:n.el.innerText,
+        left:(parseInt(n.el.style.left)+40)+"px",
+        top:(parseInt(n.el.style.top)+40)+"px"
+    });
+}
+
 // ===== 全消去 =====
 function clearAll(){
-    if(!confirm("全て削除しますか？")) return;
-
+    if(!confirm("全削除しますか？")) return;
     nodes.forEach(n=>n.el.remove());
     connections.forEach(c=>c.line.remove());
-
-    nodes = [];
-    connections = [];
+    nodes=[]; connections=[];
     localStorage.clear();
 }
 
 // ===== 保存 =====
 function save(){
-    const data = {
-        nodes: nodes.map(n=>({
+    const data={
+        nodes:nodes.map(n=>({
             id:n.id,
             text:n.el.innerText,
             left:n.el.style.left,
             top:n.el.style.top
         })),
-        connections: connections.map(c=>({a:c.a,b:c.b}))
+        connections:connections.map(c=>({a:c.a,b:c.b}))
     };
-    localStorage.setItem("tf", JSON.stringify(data));
+    localStorage.setItem("tf",JSON.stringify(data));
 }
 
 // ===== 読込 =====
 function load(){
-    const data = JSON.parse(localStorage.getItem("tf"));
+    const data=JSON.parse(localStorage.getItem("tf"));
     if(!data) return;
-
     data.nodes.forEach(n=>createNode(n));
     data.connections.forEach(c=>connect(c.a,c.b));
 }
-window.onload = load;
+window.onload=load;
 
 </script>
 </body>
