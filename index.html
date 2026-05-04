@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>ThinkFlow Pro</title>
+<title>ThinkFlow</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/leader-line-new@1.1.9/leader-line.min.js"></script>
@@ -10,123 +10,137 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
-body { margin:0; background:#f1f5f9; touch-action:none; }
+body { margin:0; background:#f1f5f9; overflow:hidden; touch-action:none; }
 
 .header {
     display:flex; justify-content:space-between;
-    padding:10px 16px; background:white;
+    padding:12px 16px; background:white;
     border-bottom:1px solid #ddd;
+    font-weight:bold;
 }
 
 .canvas {
-    width:100%; height:75vh;
+    width:100%; height:70vh;
     position:relative;
     background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
     background-size: 20px 20px;
+    transform-origin:0 0;
 }
 
 .node {
     position:absolute;
-    padding:10px;
+    padding:12px;
     border-radius:12px;
-    min-width:80px;
-    touch-action:none;
+    min-width:100px;
     background:white;
+    touch-action:none;
 }
 
-.node-box {
-    border:2px solid;
-}
-
-.node-text {
-    font-size:20px;
-    font-weight:bold;
-    background:transparent;
-}
+.node-box { border:2px solid; }
+.node-text { font-size:22px; font-weight:bold; background:transparent; }
 
 .resizer {
-    width:12px;height:12px;
+    width:14px;height:14px;
     position:absolute;
     right:0;bottom:0;
     background:#6366f1;
+}
+
+/* UI拡大 */
+.ui-scale {
+    transform:scale(1.5);
+    transform-origin:top left;
+}
+
+/* テロップ */
+.splash {
+    position:fixed;
+    inset:0;
+    background:#000;
+    color:white;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    font-size:28px;
+    z-index:9999;
+    animation:fadeOut 2.5s forwards;
+}
+
+@keyframes fadeOut {
+    0% { opacity:1; }
+    80% { opacity:1; }
+    100% { opacity:0; visibility:hidden; }
 }
 </style>
 </head>
 
 <body>
 
+<!-- テロップ -->
+<div class="splash">
+    <div style="color:#8b5cf6;">ThinkFlow</div>
+    <div style="font-size:14px;margin-top:10px;">藤井工藝</div>
+</div>
+
 <div class="header">
-    <div class="text-purple-600 font-bold">ThinkFlow</div>
+    <div style="color:#8b5cf6;">ThinkFlow</div>
     <div>藤井工藝</div>
 </div>
 
-<div class="p-2 space-y-2 bg-white">
+<div class="p-2 space-y-2 bg-white ui-scale">
 
-<!-- 上段ボタン -->
 <div class="flex gap-2 flex-wrap">
-<button onclick="undo()" class="bg-gray-300 px-3 py-1 rounded">戻る</button>
-<button onclick="exportPDF()" class="bg-indigo-500 text-white px-3 py-1 rounded">PDF</button>
-<button onclick="downloadData()" class="bg-black text-white px-3 py-1 rounded">保存</button>
-<button onclick="importData()" class="bg-gray-500 text-white px-3 py-1 rounded">読込</button>
-<button onclick="clearAll()" class="bg-red-500 text-white px-3 py-1 rounded">全消去</button>
+<button onclick="undo()">戻る</button>
+<button onclick="exportPDF()">PDF</button>
+<button onclick="downloadData()">保存</button>
+<button onclick="importData()">読込</button>
+<button onclick="clearAll()">全消去</button>
 </div>
 
-<!-- モード -->
-<select id="mode" class="w-full p-2 border rounded">
+<select id="mode">
 <option value="box">枠あり</option>
-<option value="text">枠なし（タイトル）</option>
+<option value="text">枠なし</option>
 </select>
 
-<!-- カテゴリ -->
-<select id="category" class="w-full p-2 border rounded"></select>
+<select id="category"></select>
 
 <div class="flex gap-2">
-<input id="newCat" placeholder="カテゴリ追加" class="flex-1 p-2 border rounded">
+<input id="newCat" placeholder="カテゴリ">
 <input type="color" id="catColor">
-<button onclick="addCategory()" class="bg-blue-500 text-white px-3">追加</button>
+<button onclick="addCategory()">追加</button>
 </div>
 
-<textarea id="input" class="w-full p-2 border rounded" placeholder="入力"></textarea>
-
-<button onclick="createNode()" class="w-full bg-black text-white p-2 rounded">追加</button>
+<textarea id="input" placeholder="入力"></textarea>
+<button onclick="createNode()">追加</button>
 
 </div>
 
 <div id="canvas" class="canvas"></div>
 
 <script>
+// ===== データ =====
 let categories = JSON.parse(localStorage.getItem("cats")) || {
     "資産・実績":"#3b82f6",
-    "現実・制約":"#94a3b8",
-    "感情・動機":"#ec4899",
-    "想定推移":"#f59e0b",
-    "仕組み・手段":"#6366f1",
-    "理想・目的":"#10b981"
+    "現実・制約":"#94a3b8"
 };
 
-let nodes=[];
-let connections=[];
+let nodes=[], connections=[], undoStack=[];
 let selectedNode=null;
-let undoStack=[];
 
 // ===== カテゴリ =====
 function refreshCategory(){
-    const sel=document.getElementById("category");
-    sel.innerHTML="";
+    category.innerHTML="";
     Object.keys(categories).forEach(c=>{
-        const opt=document.createElement("option");
-        opt.value=c;
-        opt.innerText=c;
-        sel.appendChild(opt);
+        let o=document.createElement("option");
+        o.value=c; o.innerText=c;
+        category.appendChild(o);
     });
 }
 refreshCategory();
 
 function addCategory(){
-    const name=newCat.value;
-    const color=catColor.value;
-    if(!name) return;
-    categories[name]=color;
+    categories[newCat.value]=catColor.value;
     localStorage.setItem("cats",JSON.stringify(categories));
     refreshCategory();
 }
@@ -150,11 +164,8 @@ function createNode(data=null){
 
     if(modeVal==="box"){
         const cat=data?data.cat:category.value;
-        const color=categories[cat];
-
         node.classList.add("node-box");
-        node.style.borderColor=color;
-
+        node.style.borderColor=categories[cat];
         node.innerHTML=`<div style="font-size:10px">${cat}</div><div>${text}</div>`;
         node.dataset.cat=cat;
     }else{
@@ -170,6 +181,7 @@ function createNode(data=null){
 
     initDrag(node);
     initResize(node,r);
+    initLongPress(node);
 
     node.onclick=(e)=>{
         e.stopPropagation();
@@ -183,12 +195,6 @@ function createNode(data=null){
         }
     };
 
-    node.onpointerdown=(e)=>{
-        let t=setTimeout(()=>deleteNode(id),700);
-        node.onpointerup=()=>clearTimeout(t);
-        node.onpointermove=()=>clearTimeout(t);
-    };
-
     canvas.appendChild(node);
     nodes.push({id,el:node});
     save();
@@ -196,7 +202,7 @@ function createNode(data=null){
 
 // ===== ドラッグ =====
 function initDrag(node){
-    node.onpointerdown=(e)=>{
+    node.addEventListener("pointerdown",(e)=>{
         if(e.target.classList.contains("resizer")) return;
         const ox=e.offsetX, oy=e.offsetY;
 
@@ -214,12 +220,12 @@ function initDrag(node){
 
         window.addEventListener("pointermove",move);
         window.addEventListener("pointerup",up);
-    };
+    });
 }
 
 // ===== リサイズ =====
 function initResize(node,r){
-    r.onpointerdown=(e)=>{
+    r.addEventListener("pointerdown",(e)=>{
         e.stopPropagation();
         let sx=e.clientX, sy=e.clientY;
         let sw=node.offsetWidth, sh=node.offsetHeight;
@@ -238,7 +244,17 @@ function initResize(node,r){
 
         window.addEventListener("pointermove",move);
         window.addEventListener("pointerup",up);
-    };
+    });
+}
+
+// ===== 長押し削除 =====
+function initLongPress(node){
+    let timer;
+    node.addEventListener("pointerdown",()=>{
+        timer=setTimeout(()=>deleteNode(node.id),700);
+    });
+    node.addEventListener("pointerup",()=>clearTimeout(timer));
+    node.addEventListener("pointermove",()=>clearTimeout(timer));
 }
 
 // ===== 接続 =====
@@ -301,7 +317,7 @@ function load(){
 }
 window.onload=load;
 
-// ===== ファイル =====
+// ===== その他 =====
 function downloadData(){
     const blob=new Blob([localStorage.getItem("tf")]);
     const a=document.createElement("a");
@@ -311,9 +327,9 @@ function downloadData(){
 }
 
 function importData(){
-    const input=document.createElement("input");
-    input.type="file";
-    input.onchange=e=>{
+    const i=document.createElement("input");
+    i.type="file";
+    i.onchange=e=>{
         const r=new FileReader();
         r.onload=ev=>{
             localStorage.setItem("tf",ev.target.result);
@@ -321,28 +337,23 @@ function importData(){
         };
         r.readAsText(e.target.files[0]);
     };
-    input.click();
+    i.click();
 }
 
-// ===== PDF =====
 async function exportPDF(){
-    const canvasEl=await html2canvas(canvas);
+    const c=await html2canvas(canvas);
     const pdf=new jspdf.jsPDF("l","mm","a4");
-    pdf.addImage(canvasEl.toDataURL(),"PNG",0,0,297,150);
+    pdf.addImage(c.toDataURL(),"PNG",0,0,297,150);
     pdf.save("thinkflow.pdf");
 }
 
-// ===== Undo =====
-function pushUndo(){
-    undoStack.push(localStorage.getItem("tf"));
-}
+function pushUndo(){ undoStack.push(localStorage.getItem("tf")); }
 function undo(){
     if(!undoStack.length) return;
     localStorage.setItem("tf",undoStack.pop());
     location.reload();
 }
 
-// ===== 全消去 =====
 function clearAll(){
     if(!confirm("全削除しますか？")) return;
     localStorage.clear();
