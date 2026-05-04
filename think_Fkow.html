@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ThinkFlow Mobile</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/leader-line-new@1.1.9/leader-line.min.js"></script>
+
+<style>
+body { touch-action: none; }
+.canvas { position: relative; width: 100%; height: 80vh; background: #fff; overflow: hidden; }
+.node { position: absolute; min-width: 80px; min-height: 40px; background: #fff; border: 2px solid #6366f1; border-radius: 10px; padding: 10px; touch-action: none; }
+.resizer { width: 14px; height: 14px; background: #6366f1; position: absolute; right: 0; bottom: 0; cursor: se-resize; }
+</style>
+</head>
+
+<body class="bg-gray-100">
+
+<div class="p-3 space-y-2">
+    <textarea id="input" class="w-full p-2 border rounded" placeholder="入力"></textarea>
+    <button onclick="createNode()" class="bg-black text-white px-4 py-2 rounded">追加</button>
+    <button onclick="downloadData()" class="bg-blue-500 text-white px-4 py-2 rounded">保存</button>
+    <button onclick="importData()" class="bg-gray-500 text-white px-4 py-2 rounded">読込</button>
+</div>
+
+<div id="canvas" class="canvas"></div>
+
+<script>
+let nodes = [];
+let connections = [];
+let selected = null;
+
+// ===== ノード作成 =====
+function createNode(data=null){
+    const text = data ? data.text : document.getElementById("input").value;
+    if(!text) return;
+
+    const node = document.createElement("div");
+    const id = data ? data.id : "n_" + Date.now();
+
+    node.className = "node";
+    node.id = id;
+    node.innerText = text;
+
+    node.style.left = data ? data.left : "50px";
+    node.style.top = data ? data.top : "50px";
+    if(data?.w) node.style.width = data.w;
+    if(data?.h) node.style.height = data.h;
+
+    // リサイズ
+    const resizer = document.createElement("div");
+    resizer.className = "resizer";
+    node.appendChild(resizer);
+
+    initDrag(node);
+    initResize(node, resizer);
+    initLongPress(node);
+
+    node.onclick = (e)=>{
+        e.stopPropagation();
+        if(!selected){
+            selected = id;
+            node.style.outline = "3px solid red";
+        }else if(selected === id){
+            selected = null;
+            node.style.outline = "none";
+        }else{
+            connect(selected, id);
+            document.getElementById(selected).style.outline="none";
+            selected=null;
+        }
+    };
+
+    document.getElementById("canvas").appendChild(node);
+    nodes.push({id, el:node});
+    save();
+}
+
+// ===== ドラッグ =====
+function initDrag(node){
+    let offsetX, offsetY;
+
+    node.addEventListener("pointerdown", (e)=>{
+        if(e.target.classList.contains("resizer")) return;
+
+        const rect = node.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+
+        const move = (me)=>{
+            node.style.left = (me.clientX - offsetX) + "px";
+            node.style.top = (me.clientY - offsetY) + "px";
+            updateLines(node.id);
+        };
+
+        const up = ()=>{
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            save();
+        };
+
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+    });
+}
+
+// ===== リサイズ =====
+function initResize(node, handle){
+    handle.addEventListener("pointerdown", (e)=>{
+        e.stopPropagation();
+
+        let startX = e.clientX;
+        let startY = e.clientY;
+        let startW = node.offsetWidth;
+        let startH = node.offsetHeight;
+
+        const move = (me)=>{
+            node.style.width = (startW + me.clientX - startX) + "px";
+            node.style.height = (startH + me.clientY - startY) + "px";
+            updateLines(node.id);
+        };
+
+        const up = ()=>{
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", up);
+            save();
+        };
+
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+    });
+}
+
+// ===== 長押し削除 =====
+function initLongPress(node){
+    let timer;
+
+    node.addEventListener("pointerdown", ()=>{
+        timer = setTimeout(()=>{
+            deleteNode(node.id);
+        }, 600);
+    });
+
+    node.addEventListener("pointerup", ()=>clearTimeout(timer));
+    node.addEventListener("pointermove", ()=>clearTimeout(timer));
+}
+
+// ===== 接続 =====
+function connect(a,b){
+    const line = new LeaderLine(
+        document.getElementById(a),
+        document.getElementById(b),
+        { color: "#6366f1" }
+    );
+    connections.push({a,b,line});
+}
+
+// ===== 線更新 =====
+function updateLines(id){
+    connections.forEach(c=>{
+        if(c.a===id || c.b===id){
+            c.line.position();
+        }
+    });
+}
+
+// ===== 削除 =====
+function deleteNode(id){
+    const node = document.getElementById(id);
+    node.remove();
+
+    connections = connections.filter(c=>{
+        if(c.a===id || c.b===id){
+            c.line.remove();
+            return false;
+        }
+        return true;
+    });
+
+    nodes = nodes.filter(n=>n.id!==id);
+    save();
+}
+
+// ===== 保存 =====
+function save(){
+    const data = {
+        nodes: nodes.map(n=>({
+            id:n.id,
+            text:n.el.innerText,
+            left:n.el.style.left,
+            top:n.el.style.top,
+            w:n.el.style.width,
+            h:n.el.style.height
+        })),
+        connections: connections.map(c=>({a:c.a,b:c.b}))
+    };
+    localStorage.setItem("tf", JSON.stringify(data));
+}
+
+// ===== 読込 =====
+function load(){
+    const data = JSON.parse(localStorage.getItem("tf"));
+    if(!data) return;
+
+    data.nodes.forEach(n=>createNode(n));
+    data.connections.forEach(c=>connect(c.a,c.b));
+}
+window.onload = load;
+
+// ===== ファイル保存 =====
+function downloadData(){
+    const blob = new Blob([localStorage.getItem("tf")]);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "data.json";
+    a.click();
+}
+
+// ===== ファイル読込 =====
+function importData(){
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = e=>{
+        const reader = new FileReader();
+        reader.onload = r=>{
+            localStorage.setItem("tf", r.target.result);
+            location.reload();
+        };
+        reader.readAsText(e.target.files[0]);
+    };
+    input.click();
+}
+</script>
+
+</body>
+</html>
