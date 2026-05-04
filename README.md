@@ -1,0 +1,2 @@
+# ThinkFlow_Visualizer_For_ANDROID
+考えを整理するためのアプリケーションです
